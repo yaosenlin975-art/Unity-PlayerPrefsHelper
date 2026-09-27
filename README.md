@@ -143,7 +143,7 @@ public static class PlayerSaveExample
 
 ## 存储位置与编辑器窗口
 
-存档按值类型名称分组。编辑器中的文件位于工程根目录的 `EditorPrefs/<hash>`，普通 Player 位于 `Application.persistentDataPath/Temps/<hash>`。WebGL 使用该哈希作为 PlayerPrefs 的键，也能读取旧版以类型完整名称为键的数据。现有存档文件仍可读取。
+存档按值类型名称分组。编辑器中的文件位于工程根目录的 `EditorPrefs/<hash>`，普通 Player 位于 `Application.persistentDataPath/Temps/<hash>`。WebGL 不落文件系统、因此不涉及路径，改用该哈希作为 PlayerPrefs 的键，也能读取旧版以类型完整名称为键的数据。现有存档文件仍可读取。
 
 在 Unity 编辑器中打开 `Lin > Prefs Helper > 持久化数据管理器`，可按树形结构浏览当前工程的 `EditorPrefs` 文件。对于唯一匹配类型的档案，点击“读取键值”，再展开 key 查看 JSON 字段和数组元素；选中 key 可删除它，选中档案可清空该类型的全部 key，操作前均需确认。未知或匹配多个类型的文件只能查看信息，或在确认后移入 `EditorPrefs/Removed`。
 

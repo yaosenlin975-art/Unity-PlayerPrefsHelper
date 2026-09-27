@@ -143,7 +143,7 @@ Call `PlayerSaveExample.LoadOrCreate("slot-1")` when opening a slot, then `Compl
 
 ## Storage and Editor window
 
-Archives are grouped by value type name and stored under `EditorPrefs/<hash>` in the Editor, or `Application.persistentDataPath/Temps/<hash>` in players. WebGL uses the hash as its PlayerPrefs key and can read the previous full type name key. Existing archive files remain readable.
+Archives are grouped by value type name and stored under `EditorPrefs/<hash>` in the Editor, or `Application.persistentDataPath/Temps/<hash>` in players. WebGL does not touch the file system (so no path is involved) and uses the hash as its PlayerPrefs key; it can also read the previous full type name key. Existing archive files remain readable.
 
 Open `Lin > Prefs Helper > 持久化数据管理器` in the Unity Editor to browse the current project's `EditorPrefs` files as a tree. Click **读取键值** on a uniquely matched archive, then expand keys to inspect JSON fields and array elements. Select a key to delete it, or select an archive to clear all keys of its type. These actions require confirmation. Ambiguous or unknown files can only be inspected or moved to `EditorPrefs/Removed` after confirmation.
 

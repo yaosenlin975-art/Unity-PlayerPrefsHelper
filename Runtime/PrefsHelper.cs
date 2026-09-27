@@ -48,15 +48,22 @@ namespace Lin.Runtime.Helper
             }
         }
 
+        // 存档目录是进程级常量，算一次即可：原实现每次调用都重算 persistentDataPath 并
+        // Directory.CreateDirectory 一遍，而它会在每个类型的 Load/Save 路径上被反复走到
+        private static string archiveDir;
+
         private static string GetArchiveDir()
         {
+            if (archiveDir is null)
+            {
 #if UNITY_EDITOR
-            var dir = "EditorPrefs";
-            Directory.CreateDirectory(dir);
-            return dir;
+                archiveDir = "EditorPrefs";
+                Directory.CreateDirectory(archiveDir);
 #else
-            return Application.persistentDataPath + "/Temps";
+                archiveDir = Application.persistentDataPath + "/Temps";
 #endif
+            }
+            return archiveDir;
         }
 
         private static PrefsArchive<T> GetArchive<T>()
@@ -145,10 +152,17 @@ namespace Lin.Runtime.Helper
         [Serializable]
         class PrefsArchive<T> : Dictionary<string, T>
         {
-            private string filePath;
             private object locker;
             internal bool readFailed;
             private const byte OFFSET = 7;
+
+            // 档名与档路径由 T 唯一确定，构造一次缓存住：GetArchiveFileName 每次都要遍历类型名算哈希，
+            // 原实现每次读/写都重算，这里改成每个封闭泛型类型只算一次
+            private static readonly string archiveFileName = GetArchiveFileName(typeof(T));
+
+#if !UNITY_WEBGL
+            private static readonly string archiveFilePath = Path.Combine(GetArchiveDir(), archiveFileName);
+#endif
 
             class PrefsEnvelope
             {
@@ -158,9 +172,9 @@ namespace Lin.Runtime.Helper
 
             public static PrefsArchive<T> Load()
             {
-                string filePath = GetPath();
                 PrefsArchive<T> result;
 #if UNITY_WEBGL
+                // WebGL 存档落在 PlayerPrefs（底层是 IndexedDB），Load/Save 都不碰文件系统，路径没有意义
                 try
                 {
                     string json = ReadWebGlJson();
@@ -175,20 +189,19 @@ namespace Lin.Runtime.Helper
                     result = new PrefsArchive<T> { readFailed = true };
                 }
 #else
-                if (File.Exists(filePath))
+                if (File.Exists(archiveFilePath))
                 {
-                    result = ReadFile(filePath, filePath, out bool corrupt);
+                    result = ReadFile(archiveFilePath, archiveFilePath, out bool corrupt);
                     if (corrupt)
-                        result = ReadBackup(filePath);
+                        result = ReadBackup(archiveFilePath);
                 }
                 else
                 {
-                    result = ReadBackup(filePath);
+                    result = ReadBackup(archiveFilePath);
                 }
 #endif
-                result.filePath = filePath;
                 result.locker = new object();
-                 
+
                 return result;
             }
 
@@ -196,7 +209,7 @@ namespace Lin.Runtime.Helper
             // 档身份从 FullName 换成 Name 哈希：老 key 再读一次，别让 WebGL 上已有的档变成孤儿
             private static string ReadWebGlJson()
             {
-                var json = PlayerPrefs.GetString(GetArchiveFileName(typeof(T)));
+                var json = PlayerPrefs.GetString(archiveFileName);
                 return string.IsNullOrEmpty(json) ? PlayerPrefs.GetString(typeof(T).FullName) : json;
             }
 #endif
@@ -384,22 +397,16 @@ namespace Lin.Runtime.Helper
             {
                 var json = JsonConvert.SerializeObject(new PrefsEnvelope { v = ARCHIVE_VERSION, d = archive });
 #if UNITY_WEBGL
-                PlayerPrefs.SetString(GetArchiveFileName(typeof(T)), json);
+                PlayerPrefs.SetString(archiveFileName, json);
                 // 官方只承诺 OnApplicationQuit 时自动写盘，而 Web 平台明确不支持那个回调：
                 // 不显式 Sync 就等于把落盘时机交给浏览器
                 PlayerPrefs.Save();
 #else
                 var bytes = strictUtf8.GetBytes(json);
-                string dir = Path.GetDirectoryName(archive.filePath);
-                Directory.CreateDirectory(dir);
-                Translate(bytes, archive.filePath);
-                WriteAtomically(archive.filePath, bytes);
+                Directory.CreateDirectory(GetArchiveDir());
+                Translate(bytes, archiveFilePath);
+                WriteAtomically(archiveFilePath, bytes);
 #endif
-            }
-
-            private static string GetPath()
-            {
-                return Path.Combine(GetArchiveDir(), GetArchiveFileName(typeof(T)));
             }
 
             public void Set(string key, T value)
