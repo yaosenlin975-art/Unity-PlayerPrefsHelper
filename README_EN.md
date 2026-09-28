@@ -14,7 +14,7 @@ Install `com.lin.runtime-prefs-helper` as an embedded or local UPM package. In t
 | --- | --- |
 | `Set<T>(key, value)` | Adds or replaces a value and saves it immediately. |
 | `Get<T>(key)` | Returns the value, or `default(T)` when the key is absent. |
-| `Get<T>(key, defaultValue)` / `Get<T>(key, createFunc)` | Returns a fallback for a missing key. The fallback is **not saved** until you call `Set`. |
+| `Get<T>(key, defaultValue)` / `Get<T>(key, createFunc)` | Returns a fallback for a missing key. `defaultValue` is not saved; `createFunc` builds the value under the archive lock and writes it back (avoids concurrent double-create). |
 | `ContainsKey<T>(key)` | Checks whether the key exists. |
 | `GetAllKeys<T>()` | Returns a snapshot of keys stored for `T`. |
 | `DeleteKey<T>(key)` | Removes one key and saves the change. |

@@ -14,7 +14,7 @@
 | --- | --- |
 | `Set<T>(key, value)` | 新增或覆盖值，并立即保存。 |
 | `Get<T>(key)` | 读取值；key 不存在时返回 `default(T)`。 |
-| `Get<T>(key, defaultValue)` / `Get<T>(key, createFunc)` | key 不存在时返回备用值；备用值**不会自动保存**，需要时应再调用 `Set`。 |
+| `Get<T>(key, defaultValue)` / `Get<T>(key, createFunc)` | key 不存在时返回备用值。`defaultValue` 不会自动保存；`createFunc` 会在锁内创建并回写档，避免并发双造。 |
 | `ContainsKey<T>(key)` | 判断 key 是否存在。 |
 | `GetAllKeys<T>()` | 返回类型 `T` 下的 key 快照。 |
 | `DeleteKey<T>(key)` | 删除单个 key 并保存。 |

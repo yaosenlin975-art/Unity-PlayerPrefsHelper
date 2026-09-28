@@ -57,7 +57,9 @@ namespace Lin.Runtime.Helper
             if (archiveDir is null)
             {
 #if UNITY_EDITOR
-                archiveDir = "EditorPrefs";
+                // 锚定工程根（Assets 上级）：相对进程 CWD 的 "EditorPrefs" 在启动目录不同时会写到别处，
+                // 编辑器窗口与 Runtime 也必须看到同一份档
+                archiveDir = Path.Combine(Path.GetDirectoryName(Application.dataPath), "EditorPrefs");
                 Directory.CreateDirectory(archiveDir);
 #else
                 archiveDir = Application.persistentDataPath + "/Temps";
@@ -191,7 +193,7 @@ namespace Lin.Runtime.Helper
 #else
                 if (File.Exists(archiveFilePath))
                 {
-                    result = ReadFile(archiveFilePath, archiveFilePath, out bool corrupt);
+                    result = ReadFile(archiveFilePath, out bool corrupt);
                     if (corrupt)
                         result = ReadBackup(archiveFilePath);
                 }
@@ -222,7 +224,7 @@ namespace Lin.Runtime.Helper
                 if (!File.Exists(bakPath))
                     return new PrefsArchive<T>();
 
-                var result = ReadFile(bakPath, filePath, out bool corrupt);
+                var result = ReadFile(bakPath, out bool corrupt);
                 if (!corrupt && !result.readFailed)
                     Debug.LogWarning(string.Format("[PrefsHelper] {0} 主档缺失或损坏，已从 {1} 恢复上一版。", typeof(T).FullName, bakPath));
                 return result;
@@ -256,7 +258,7 @@ namespace Lin.Runtime.Helper
             }
 
 #if !UNITY_WEBGL
-            private static PrefsArchive<T> ReadFile(string readPath, string archivePath, out bool corrupt)
+            private static PrefsArchive<T> ReadFile(string readPath, out bool corrupt)
             {
                 corrupt = false;
                 string json = null;
@@ -271,7 +273,7 @@ namespace Lin.Runtime.Helper
                         return new PrefsArchive<T>();
                     }
 
-                    Translate(bytes, archivePath);
+                    DeobfuscateForRead(bytes);
                     json = Decode(bytes);
                     if (string.IsNullOrWhiteSpace(json))
                     {
@@ -332,7 +334,7 @@ namespace Lin.Runtime.Helper
                 int suffix = 1;
                 while (File.Exists(badPath))
                 {
-                    badPath = string.Concat(filePath, ".bad.", suffix.ToString());
+                    badPath = string.Concat(filePath, ".bad.", suffix);
                     suffix++;
                 }
 
@@ -350,16 +352,74 @@ namespace Lin.Runtime.Helper
                 return quarantined;
             }
 
-            // 单字节 XOR 混淆：只让档文件不可直读，不是加密（key 由类型全名长度与路径长度推出，JSON 恒以 {" 开头，
-            // 两个已知明文字节就能把它恢复出来）。客户端本地存档本来也不构成安全边界，别把它当防护
-            private static void Translate(byte[] bytes, string path)
+            // 单字节 XOR 混淆：只让档文件不可直读，不是加密（JSON 恒以 {" 开头，已知明文即可恢复）。
+            // 客户端本地存档本来也不构成安全边界，别把它当防护。
+            // 新密钥由固定盐 + 类型 FullName 稳定哈希推出，与路径无关——旧算法依赖路径长度，
+            // 路径或类型名一变就解成垃圾被隔离 .bad，等价丢档。
+            private static byte ComputeKey()
+            {
+                unchecked
+                {
+                    // 固定盐，避免与同结构 FNV 撞车
+                    const uint salt = 0xA5C39E37u;
+                    uint hash = salt;
+                    string name = typeof(T).FullName;
+                    for (int i = 0; i < name.Length; i++)
+                        hash = (hash ^ name[i]) * 0x01000193u;
+                    byte key = (byte)(hash & 0xFF);
+                    return key == 0 ? OFFSET : key;
+                }
+            }
+
+            // 旧密钥（只读兼容）：旧算法由 FullName.Length + 路径长度推出。
+            // 路径必须按当年写盘时的形态还原：编辑器是相对 "EditorPrefs/<hash>"，真机是 persistentDataPath 完整路径。
+            // 真机上若安装路径长度变过，旧档仍无法解出——这种档只能重导。
+            private static byte ComputeLegacyKey()
             {
                 Type type = typeof(T);
                 byte flags = (byte)(type.FullName.Length % byte.MaxValue);
-                byte offset = (byte)((flags + path.Length) % byte.MaxValue);
-                offset = offset == 0 ? OFFSET : offset;
+#if UNITY_EDITOR
+                string legacyPath = Path.Combine("EditorPrefs", archiveFileName);
+#else
+                // 必须与旧版 GetArchiveDir 写盘时的路径字符串逐字一致，否则长度对不上、旧档解不开
+                string legacyPath = Path.Combine(Application.persistentDataPath + "/Temps", archiveFileName);
+#endif
+                byte offset = (byte)((flags + legacyPath.Length) % byte.MaxValue);
+                return offset == 0 ? OFFSET : offset;
+            }
+
+            private static void XorInPlace(byte[] bytes, byte key)
+            {
                 for (int i = 0; i < bytes.Length; i++)
-                    bytes[i] ^= offset;
+                    bytes[i] ^= key;
+            }
+
+            // 写盘固定用新密钥
+            private static void Translate(byte[] bytes)
+            {
+                XorInPlace(bytes, ComputeKey());
+            }
+
+            // 读盘：先按新密钥解；结果不像 JSON 时按旧密钥再解一次（存量档一次性兼容，下次写盘自动升级）。
+            // 两种密钥都可能凑巧解出 '{'，概率极低且混淆本就不防篡改，不为此再做二次校验
+            private static void DeobfuscateForRead(byte[] bytes)
+            {
+                byte newKey = ComputeKey();
+                XorInPlace(bytes, newKey);
+                if (LooksLikeJson(bytes))
+                    return;
+
+                // 首字节不像 JSON：还原后换旧密钥；仍不像则不再告警，交给解析失败/隔离流程
+                XorInPlace(bytes, newKey);
+                XorInPlace(bytes, ComputeLegacyKey());
+                if (LooksLikeJson(bytes))
+                    Debug.LogWarning(string.Format("[PrefsHelper] {0} 命中旧混淆密钥存档，已按兼容方式读取；下次写盘自动升级为新密钥。", typeof(T).FullName));
+            }
+
+            private static bool LooksLikeJson(byte[] bytes)
+            {
+                // 存档 JSON（信封或裸字典）恒以 '{' 开头
+                return bytes.Length > 0 && bytes[0] == (byte)'{';
             }
 
             // 就地覆盖会在进程被杀/断电时留下撕裂档，下次读直接解不出来、整档进 .bad；
@@ -404,7 +464,7 @@ namespace Lin.Runtime.Helper
 #else
                 var bytes = strictUtf8.GetBytes(json);
                 Directory.CreateDirectory(GetArchiveDir());
-                Translate(bytes, archiveFilePath);
+                Translate(bytes);
                 WriteAtomically(archiveFilePath, bytes);
 #endif
             }
@@ -474,8 +534,16 @@ namespace Lin.Runtime.Helper
                 {
                     if (TryGetValue(key, out T result))
                         return result;
+
+                    // 命中缺失后在锁内创建并回写：原先锁外创建不落盘，并发会各自双造且互不可见。
+                    // Monitor 可重入，createFunc 同线程再进本档也不会死锁
+                    if (readFailed)
+                        throw new InvalidOperationException("存档读取失败，已跳过写入。");
+                    result = createFunc();
+                    this[key] = result;
+                    Save(this);
+                    return result;
                 }
-                return createFunc();
             }
         }
     }

@@ -190,7 +190,9 @@ namespace Lin.Runtime.Helper.Tests
 
         private static string GetArchivePath<T>()
         {
-            return Path.Combine("EditorPrefs", PrefsHelper.GetArchiveFileName(typeof(T)));
+            // 与 PrefsHelper.GetArchiveDir 同锚点：工程根 = Application.dataPath 上级
+            string projectRoot = Path.GetDirectoryName(Application.dataPath);
+            return Path.Combine(projectRoot, "EditorPrefs", PrefsHelper.GetArchiveFileName(typeof(T)));
         }
 
         private static void DeleteArchiveFiles<T>()
@@ -215,8 +217,9 @@ namespace Lin.Runtime.Helper.Tests
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             byte[] bytes = Encoding.UTF8.GetBytes(json);
             Type archiveType = typeof(PrefsHelper).GetNestedType("PrefsArchive`1", BindingFlags.NonPublic).MakeGenericType(typeof(T));
+            // 新签名只收 bytes，写盘固定用新密钥（与路径无关）
             MethodInfo translate = archiveType.GetMethod("Translate", BindingFlags.NonPublic | BindingFlags.Static);
-            translate.Invoke(null, new object[] { bytes, path });
+            translate.Invoke(null, new object[] { bytes });
             File.WriteAllBytes(path, bytes);
         }
 

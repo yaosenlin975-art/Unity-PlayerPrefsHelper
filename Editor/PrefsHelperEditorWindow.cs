@@ -214,7 +214,8 @@ namespace Lin.Runtime.Helper.Editor
 
         private void RefreshArchives()
         {
-            archiveDirectory = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "EditorPrefs"));
+            // 与 Runtime GetArchiveDir 同锚点：工程根 = Application.dataPath 上级，不依赖进程 CWD
+            archiveDirectory = Path.Combine(Path.GetDirectoryName(Application.dataPath), "EditorPrefs");
             scanError = null;
             operationMessage = null;
             Dictionary<string, ArchiveRecord> previous = new Dictionary<string, ArchiveRecord>(StringComparer.OrdinalIgnoreCase);
